@@ -161,7 +161,10 @@ await app.register(FastifyStatic, { root: PUBLIC_DIR, prefix: '/' });
 function getSessions(since?: string, source?: string) {
   const { sessions } = getData();
   let filtered = filterByDate(sessions, since);
-  if (source) filtered = filtered.filter((s) => s.source === source);
+  if (source) {
+    const sources = new Set(source.split(',').filter(Boolean));
+    filtered = filtered.filter((s) => sources.has(s.source));
+  }
   return filtered;
 }
 
@@ -233,7 +236,10 @@ app.get('/api/sessions', async (req) => {
 
   let filtered = sessions;
   if (!includeNoPrompt) filtered = filtered.filter((s) => !isNoPromptSession(s));
-  if (query.source) filtered = filtered.filter((s) => s.source === query.source);
+  if (query.source) {
+    const sources = new Set(query.source.split(',').filter(Boolean));
+    filtered = filtered.filter((s) => sources.has(s.source));
+  }
   if (query.projectId) filtered = filtered.filter((s) => s.projectId === query.projectId);
   if (query.projectName) filtered = filtered.filter((s) => s.projectName.localeCompare(query.projectName, undefined, { sensitivity: 'base' }) === 0);
   if (query.model) filtered = filtered.filter((s) => s.primaryModel === query.model);

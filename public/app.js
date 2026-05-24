@@ -62,31 +62,45 @@ function fmtDateTime(iso) {
   return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+function localDateKey(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function displayModelName(model) {
+  return String(model || '').replace(/^opencode\//i, '');
+}
+
 function modelBadgeHtml(model, isLocal) {
   if (!model || model === 'unknown') {
     return `<span class="model-badge unknown">unknown</span>`;
   }
+  const displayModel = displayModelName(model);
   const safeModel = escHtml(model);
-  if (isLocal) {
-    return `<span class="model-badge local" title="${safeModel}">${safeModel}</span>`;
-  }
+  const safeDisplayModel = escHtml(displayModel);
   if (/^(claude-|anthropic\/)/i.test(model)) {
-    return `<span class="model-badge claude" title="${safeModel}">${safeModel}</span>`;
+    return `<span class="model-badge claude" title="${safeModel}">${safeDisplayModel}</span>`;
   }
   if (/^(gpt-|openai\/|codex-|o[1345])/i.test(model)) {
-    return `<span class="model-badge codex" title="${safeModel}">${safeModel}</span>`;
+    return `<span class="model-badge codex" title="${safeModel}">${safeDisplayModel}</span>`;
   }
-  return `<span class="model-badge unknown" title="${safeModel}">${safeModel}</span>`;
+  if (isLocal || /^opencode\//i.test(model) || !isRemoteModelName(model)) {
+    return `<span class="model-badge local" title="${safeModel}">${safeDisplayModel}</span>`;
+  }
+  return `<span class="model-badge unknown" title="${safeModel}">${safeDisplayModel}</span>`;
 }
 
 function sourceMeta(source) {
   if (source === 'codex') return { label: 'Codex', icon: 'Cx', cls: 'codex' };
+  if (source === 'opencode') return { label: 'OpenCode', icon: 'Oc', cls: 'opencode' };
   return { label: 'Claude Code', icon: 'Cc', cls: 'claude' };
 }
 
 function agentBadgeHtml(source, opts = {}) {
   const meta = sourceMeta(source);
-  const label = opts.short ? meta.label.replace(' Code', '') : meta.label;
+  const label = meta.label;
   return `<span class="agent-badge agent-badge--${meta.cls}" title="Agent: ${escHtml(meta.label)}">
     <span class="agent-badge-icon">${escHtml(meta.icon)}</span>
     <span class="agent-badge-label">${escHtml(label)}</span>
@@ -95,7 +109,7 @@ function agentBadgeHtml(source, opts = {}) {
 
 function isRemoteModelName(model) {
   if (!model) return false;
-  return /^(claude-|anthropic\/|gpt-|openai\/|codex-|o[1345]|gemini|google\/)/i.test(model);
+  return /^(claude-|anthropic\/|gpt-|openai\/|codex-|opencode\/|o[1345]|gemini|google\/)/i.test(model);
 }
 
 function isLocalSession(s) {
@@ -107,7 +121,7 @@ function shortModelName(model) {
   // claude-opus-4-7 → Opus 4.7
   // claude-sonnet-4-6 → Sonnet 4.6
   // claude-haiku-4-5-20251001 → Haiku 4.5
-  return model
+  return displayModelName(model)
     .replace('claude-', '')
     .replace(/-(\d{8})$/, '')
     .replace(/-/g, ' ')
@@ -231,6 +245,27 @@ const RECOMMENDED_PLANS_BY_SOURCE = {
   claude: CLAUDE_RECOMMENDED_PLAN,
   codex: CODEX_RECOMMENDED_PLAN,
 };
+const AGENT_SOURCES = ['claude', 'codex', 'opencode'];
+
+function normalizeAgentSources(sources) {
+  const valid = Array.isArray(sources) ? sources.filter(source => AGENT_SOURCES.includes(source)) : [];
+  return AGENT_SOURCES.filter(source => valid.includes(source));
+}
+
+function agentSourceToggleHtml(scope, activeSources) {
+  return AGENT_SOURCES.map(source => {
+    const meta = sourceMeta(source);
+    const active = activeSources.includes(source) ? ' sc-view-btn--on' : '';
+    return `<button class="sc-view-btn agent-source-btn${active}" data-${scope}-source="${source}">${meta.label}</button>`;
+  }).join('');
+}
+
+function agentSourceParams(activeSources) {
+  const normalized = normalizeAgentSources(activeSources);
+  return normalized.length > 0 && normalized.length < AGENT_SOURCES.length
+    ? { source: normalized.join(',') }
+    : {};
+}
 
 function periodToSince(mode, period) {
   if (period === 'all') return undefined;
@@ -394,7 +429,7 @@ const state = {
   overviewHiddenCards: new Set(),
   overviewPanelOrder: null,
   overviewEditMode: false,
-  agentSources: ['claude', 'codex'],
+  agentSources: ['claude', 'codex', 'opencode'],
   overviewFilter: {},
   sessionsPage: 0,
   sessionsLimit: 50,
@@ -780,8 +815,8 @@ function renderUsageGrid(dailyAll) {
   const byDate = {};
   for (const d of dailyAll) byDate[d.date] = d;
 
-  const maxCost = Math.max(...dailyAll.map(d => d.cost), 0.001);
-  const activeDays = dailyAll.filter(d => d.cost > 0).length;
+  const maxTokens = Math.max(...dailyAll.map(d => d.tokens || 0), 1);
+  const activeDays = dailyAll.filter(d => (d.sessions || 0) > 0 || (d.tokens || 0) > 0).length;
 
   // Align back to the Sunday of the week containing gridStart
   const alignedStart = new Date(gridStart);
@@ -790,28 +825,32 @@ function renderUsageGrid(dailyAll) {
   const WEEKS = Math.ceil((Math.floor((today - alignedStart) / 86400000) + 1) / 7);
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-  // Claude orange: rgb(217,119,87)  Codex blue: rgb(91,141,239)
-  const CLAUDE_RGB = [217, 119, 87];
-  const CODEX_RGB  = [91, 141, 239];
+  const SOURCE_RGB = {
+    claude: [217, 119, 87],
+    codex: [91, 141, 239],
+    opencode: [0, 194, 129],
+  };
   const LEVEL_OPACITY = [0, 0.32, 0.52, 0.72, 0.92];
 
-  function getLevel(cost) {
-    if (cost === 0) return 0;
-    const pct = cost / maxCost;
+  function getLevel(data) {
+    if (!data || ((data.sessions || 0) === 0 && (data.tokens || 0) === 0)) return 0;
+    const pct = (data.tokens || 0) / maxTokens;
     if (pct < 0.1) return 1;
     if (pct < 0.3) return 2;
     if (pct < 0.6) return 3;
     return 4;
   }
 
-  function blendCellColor(claudeCost, codexCost, level) {
-    const total = claudeCost + codexCost;
+  function blendCellColor(sourceAmounts, level) {
+    const entries = Object.entries(sourceAmounts).filter(([, amount]) => amount > 0);
+    const total = entries.reduce((sum, [, amount]) => sum + amount, 0);
     if (total === 0 || level === 0) return null;
-    const ratio = claudeCost / total; // 1 = all claude, 0 = all codex
-    const r = Math.round(CODEX_RGB[0] + (CLAUDE_RGB[0] - CODEX_RGB[0]) * ratio);
-    const g = Math.round(CODEX_RGB[1] + (CLAUDE_RGB[1] - CODEX_RGB[1]) * ratio);
-    const b = Math.round(CODEX_RGB[2] + (CLAUDE_RGB[2] - CODEX_RGB[2]) * ratio);
-    return `rgba(${r},${g},${b},${LEVEL_OPACITY[level]})`;
+    const [r, g, b] = entries.reduce((acc, [source, amount]) => {
+      const rgb = SOURCE_RGB[source] || SOURCE_RGB.codex;
+      const weight = amount / total;
+      return [acc[0] + rgb[0] * weight, acc[1] + rgb[1] * weight, acc[2] + rgb[2] * weight];
+    }, [0, 0, 0]);
+    return `rgba(${Math.round(r)},${Math.round(g)},${Math.round(b)},${LEVEL_OPACITY[level]})`;
   }
 
   const weekCols = [];
@@ -824,7 +863,7 @@ function renderUsageGrid(dailyAll) {
       const date = new Date(alignedStart);
       date.setDate(alignedStart.getDate() + w * 7 + d);
       const isFuture = date > today;
-      const dateStr = date.toISOString().slice(0, 10);
+      const dateStr = localDateKey(date);
 
       if (d === 0 && !isFuture && date.getMonth() !== lastMonth) {
         lastMonth = date.getMonth();
@@ -838,11 +877,16 @@ function renderUsageGrid(dailyAll) {
         const data = byDate[dateStr];
         const cost = data?.cost || 0;
         const sessions = data?.sessions || 0;
-        const tip = cost > 0
-          ? `${dateStr}  ${fmtCost(cost)}  ${sessions} session${sessions !== 1 ? 's' : ''}`
+        const tokens = data?.tokens || 0;
+        const tip = sessions > 0 || tokens > 0
+          ? `${dateStr}  ${fmtCost(cost)}  ${sessions} session${sessions !== 1 ? 's' : ''}  ${fmtTokens(tokens)} tokens`
           : `${dateStr}  no activity`;
-        const level = getLevel(cost);
-        const blended = blendCellColor(data?.claudeCost || 0, data?.codexCost || 0, level);
+        const level = getLevel(data);
+        const blended = blendCellColor({
+          claude: data?.claudeTokens || 0,
+          codex: data?.codexTokens || 0,
+          opencode: data?.opencodeTokens || 0,
+        }, level);
         const styleVal = level > 0
           ? `--cd:${Math.floor(Math.random() * 2400)}ms${blended ? `;--cell-color:${blended}` : ''}`
           : '';
@@ -1021,7 +1065,7 @@ async function renderOverview() {
   setLoading();
   try {
     const activeSources = state.agentSources;
-    const sourceParams = activeSources.length === 1 ? { source: activeSources[0] } : {};
+    const sourceParams = agentSourceParams(activeSources);
     const sourceStatsPromise = Promise.all(activeSources.map(source =>
       api.stats({ source }).then(sourceStats => [source, sourceStats])
     ));
@@ -1078,8 +1122,7 @@ async function renderOverview() {
         <div class="overview-controls">
           ${fieldsButtonHtml('overview-cards-btn', state.overviewHiddenCards, cardDefs.length, 'Cards')}
           <div class="sc-view-toggle agent-source-toggle" aria-label="Overview agent filter">
-            <button class="sc-view-btn agent-source-btn${activeSources.includes('claude') ? ' sc-view-btn--on' : ''}" data-overview-source="claude">Claude Code</button>
-            <button class="sc-view-btn agent-source-btn${activeSources.includes('codex') ? ' sc-view-btn--on' : ''}" data-overview-source="codex">Codex</button>
+            ${agentSourceToggleHtml('overview', activeSources)}
           </div>
         </div>
       </div>
@@ -1102,7 +1145,7 @@ async function renderOverview() {
               <div class="metric-sub">per paid session</div>
             </div>
             <div class="metric-card" data-card-id="metric-sessions">
-              <span class="metric-help" data-tooltip="Number of Claude Code and Codex sessions in the selected period. Each session is one local conversation log.">?</span>
+              <span class="metric-help" data-tooltip="Number of agent sessions in the selected period. Each session is one local conversation log or OpenCode database session.">?</span>
               <div class="metric-label">Sessions</div>
               <div class="metric-value mono">${stats.totalSessions.toLocaleString()}</div>
               <div class="metric-sub">${stats.projectCount} project${stats.projectCount !== 1 ? 's' : ''}</div>
@@ -1258,9 +1301,9 @@ async function renderOverview() {
         const current = state.agentSources;
         const isActive = current.includes(source);
         if (isActive && current.length === 1) return;
-        state.agentSources = isActive
+        state.agentSources = normalizeAgentSources(isActive
           ? current.filter(s => s !== source)
-          : [...current, source].sort();
+          : [...current, source]);
         localStorage.setItem('agent-sources', JSON.stringify(state.agentSources));
         renderOverview();
       });
@@ -1306,7 +1349,7 @@ async function renderOverview() {
 async function loadOverviewSessions() {
   const sessionsParams = { limit: 10, offset: 0 };
   const activeSources = state.agentSources;
-  if (activeSources.length === 1) sessionsParams.source = activeSources[0];
+  Object.assign(sessionsParams, agentSourceParams(activeSources));
   if (state.overviewSessionSort === 'cost') sessionsParams.sort = 'cost';
 
   const recentWrap = document.getElementById('recent-sessions-wrap');
@@ -1324,7 +1367,7 @@ async function renderProjects() {
   setLoading();
   try {
     const activeSources = state.agentSources;
-    const projectParams = activeSources.length === 1 ? { source: activeSources[0] } : {};
+    const projectParams = agentSourceParams(activeSources);
     if (state.projectRollupByName) projectParams.rollup = 'name';
     const projects = await api.projects(projectParams);
     const sortedProjects = sortProjects(projects);
@@ -1343,8 +1386,7 @@ async function renderProjects() {
             <button class="sc-view-btn${state.projectRollupByName ? ' sc-view-btn--on' : ''}" data-project-rollup="name">Combine Names</button>
           </div>
           <div class="sc-view-toggle agent-source-toggle" aria-label="Project agent filter">
-            <button class="sc-view-btn agent-source-btn${activeSources.includes('claude') ? ' sc-view-btn--on' : ''}" data-project-source="claude">Claude Code</button>
-            <button class="sc-view-btn agent-source-btn${activeSources.includes('codex') ? ' sc-view-btn--on' : ''}" data-project-source="codex">Codex</button>
+            ${agentSourceToggleHtml('project', activeSources)}
           </div>
         </div>
       </div>
@@ -1372,9 +1414,9 @@ async function renderProjects() {
         const current = state.agentSources;
         const isActive = current.includes(source);
         if (isActive && current.length === 1) return;
-        state.agentSources = isActive
+        state.agentSources = normalizeAgentSources(isActive
           ? current.filter(s => s !== source)
-          : [...current, source].sort();
+          : [...current, source]);
         localStorage.setItem('agent-sources', JSON.stringify(state.agentSources));
         renderProjects();
       });
@@ -1408,7 +1450,7 @@ async function toggleProject(cardEl) {
 
   try {
     const activeSources = state.agentSources;
-    const sourceParams = activeSources.length === 1 ? { source: activeSources[0] } : {};
+    const sourceParams = agentSourceParams(activeSources);
     const projectParams = cardEl.dataset.projectRollupMode === 'name'
       ? { projectName: cardEl.dataset.projectName || '' }
       : { projectId: cardEl.dataset.project || '' };
@@ -1460,7 +1502,7 @@ async function renderSessions() {
   setLoading();
   try {
     const activeSources = state.agentSources;
-    const sessionSourceParams = activeSources.length === 1 ? { source: activeSources[0] } : {};
+    const sessionSourceParams = agentSourceParams(activeSources);
     const [{ sessions, total }, projects, models] = await Promise.all([
       api.sessions({
         limit: state.sessionsLimit,
@@ -1524,8 +1566,7 @@ async function renderSessions() {
         <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
           ${fieldsButtonHtml('sess-fields-btn', state.sessHiddenCols, SESSION_COL_DEFS.length)}
           <div class="sc-view-toggle agent-source-toggle sessions-agent-toggle" aria-label="Session agent filter">
-            <button class="sc-view-btn agent-source-btn${activeSources.includes('claude') ? ' sc-view-btn--on' : ''}" data-session-source="claude">Claude Code</button>
-            <button class="sc-view-btn agent-source-btn${activeSources.includes('codex') ? ' sc-view-btn--on' : ''}" data-session-source="codex">Codex</button>
+            ${agentSourceToggleHtml('session', activeSources)}
           </div>
         </div>
       </div>
@@ -1551,9 +1592,9 @@ async function renderSessions() {
         const current = state.agentSources;
         const isActive = current.includes(source);
         if (isActive && current.length === 1) return;
-        state.agentSources = isActive
+        state.agentSources = normalizeAgentSources(isActive
           ? current.filter(s => s !== source)
-          : [...current, source].sort();
+          : [...current, source]);
         localStorage.setItem('agent-sources', JSON.stringify(state.agentSources));
         state.sessionsPage = 0;
         renderSessions();
@@ -3468,7 +3509,7 @@ async function renderSettings() {
       <div class="settings-section">
         <div class="settings-section-title">Log Retention</div>
         <div class="settings-section-desc">
-          Token Bleed reads local session logs from Claude Code and Codex.
+          Token Bleed reads local session data from Claude Code, Codex, and OpenCode.
           Claude Code exposes a day limit. Codex session logs are stored separately, so Token Bleed shows their size without changing a retention setting.
         </div>
         <div class="retention-subsection">
@@ -3595,8 +3636,10 @@ async function renderSettings() {
       try {
         const cp = collectCustomPricing();
         await api.saveAppSettings({ customPricing: cp });
+        await api.refresh();
         state.appSettings.customPricing = cp;
-        status.textContent = 'Saved — refresh data to apply';
+        state.data.allSessions = null;
+        status.textContent = 'Saved — dashboard updated';
         setTimeout(() => { status.textContent = ''; }, 3000);
       } catch {
         status.textContent = 'Error saving';
@@ -4375,7 +4418,7 @@ function showRetentionModal(meta, appSettings = state.appSettings ?? {}) {
       </div>
       <div class="onboarding-section-title">Keep enough history</div>
       <p class="onboarding-text">
-        Token Bleed reads local Claude Code and Codex session logs. If a tool deletes its logs, those sessions disappear from this dashboard too.
+        Token Bleed reads local Claude Code, Codex, and OpenCode session data. If a tool deletes its logs, those sessions disappear from this dashboard too.
       </p>
       <div class="retention-status-grid">
         <div class="retention-status-card">
@@ -4494,7 +4537,7 @@ function showAboutModal(options = {}) {
       <div class="about-hero">
         <div class="about-hero-title">Token <span class="about-logo-bleed">Bleed</span> <span class="about-version">open source · MIT</span></div>
         <p class="about-hero-tagline">
-          Every time Claude Code or Codex writes a line of code, it burns tokens.
+          Every time your coding agent writes a line of code, it burns tokens.
           Those tokens cost money, but neither tool gives you much visibility into where it's all going.
           Until now.
         </p>
@@ -4505,7 +4548,7 @@ function showAboutModal(options = {}) {
           <div class="about-feature">
             <div class="about-feature-icon">◈</div>
             <div class="about-feature-title">What burned</div>
-            <div class="about-feature-text">Claude Code and Codex session logs turned into real dollar costs. Per prompt. Per session. Per project.</div>
+            <div class="about-feature-text">Claude Code, Codex, and OpenCode sessions turned into real dollar costs. Per prompt. Per session. Per project.</div>
           </div>
           <div class="about-feature">
             <div class="about-feature-icon">⟷</div>
@@ -4709,7 +4752,8 @@ function init() {
     const savedAgentSources = localStorage.getItem('agent-sources');
     if (savedAgentSources) {
       const parsed = JSON.parse(savedAgentSources);
-      if (Array.isArray(parsed) && parsed.length > 0) state.agentSources = parsed;
+      const normalized = normalizeAgentSources(parsed);
+      if (normalized.length > 0) state.agentSources = normalized;
     }
   } catch { }
   try {
@@ -4781,7 +4825,7 @@ function init() {
   const shareBtn = document.getElementById('header-share-btn');
   const shareDropdown = document.getElementById('share-dropdown');
   const shareUrl = 'https://tokenbleed.dev';
-  const shareText = 'Token Bleed shows you exactly what you\'re spending on Claude Code and Codex. Free.';
+  const shareText = 'Token Bleed shows you exactly what you\'re spending on Claude Code, Codex, and OpenCode. Free.';
 
   shareBtn.addEventListener('click', (e) => {
     e.stopPropagation();
