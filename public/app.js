@@ -2125,21 +2125,64 @@ async function renderComparison() {
       <p class="page-subtitle">${periodLabel()} · side-by-side stats per model</p>
 
       <div class="comparison-selectors">
-        <select id="comp-model1">
-          ${models.map(m => `<option value="${escHtml(m.model)}" ${m.model === state.compModel1 ? 'selected' : ''}>${escHtml(m.model)}</option>`).join('')}
-        </select>
+        <div class="custom-dropdown" id="comp-model1-dropdown">
+          <button type="button" class="section-title-select custom-dropdown-toggle" aria-haspopup="listbox" aria-expanded="false" style="min-width: 220px;">
+            ${escHtml(state.compModel1 || 'Select Model')}
+          </button>
+          <div class="custom-dropdown-popper" role="listbox">
+            ${models.map(m => `<div class="custom-dropdown-option ${m.model === state.compModel1 ? 'selected' : ''}" data-value="${escHtml(m.model)}" role="option">${escHtml(m.model)}</div>`).join('')}
+          </div>
+        </div>
         <span class="comparison-vs-label">vs</span>
-        <select id="comp-model2">
-          ${models.map(m => `<option value="${escHtml(m.model)}" ${m.model === state.compModel2 ? 'selected' : ''}>${escHtml(m.model)}</option>`).join('')}
-        </select>
+        <div class="custom-dropdown" id="comp-model2-dropdown">
+          <button type="button" class="section-title-select custom-dropdown-toggle" aria-haspopup="listbox" aria-expanded="false" style="min-width: 220px;">
+            ${escHtml(state.compModel2 || 'Select Model')}
+          </button>
+          <div class="custom-dropdown-popper" role="listbox">
+            ${models.map(m => `<div class="custom-dropdown-option ${m.model === state.compModel2 ? 'selected' : ''}" data-value="${escHtml(m.model)}" role="option">${escHtml(m.model)}</div>`).join('')}
+          </div>
+        </div>
         <button class="compare-btn" id="compare-btn">Compare</button>
       </div>
 
       <div id="comparison-result"></div>
     `;
 
-    document.getElementById('comp-model1').addEventListener('change', e => { state.compModel1 = e.target.value; });
-    document.getElementById('comp-model2').addEventListener('change', e => { state.compModel2 = e.target.value; });
+    const bindCompDropdown = (id, stateKey) => {
+      const dropdown = document.getElementById(id);
+      if (!dropdown) return;
+
+      dropdown.addEventListener('click', (e) => {
+        const toggle = e.target.closest('.custom-dropdown-toggle');
+        if (toggle) {
+          e.stopPropagation();
+          const isExpanded = toggle.getAttribute('aria-expanded') === 'true';
+          toggle.setAttribute('aria-expanded', !isExpanded);
+          return;
+        }
+
+        const opt = e.target.closest('.custom-dropdown-option');
+        if (opt) {
+          e.stopPropagation();
+          const val = opt.getAttribute('data-value');
+          if (val !== state[stateKey]) {
+            state[stateKey] = val;
+            const toggleBtn = dropdown.querySelector('.custom-dropdown-toggle');
+            if (toggleBtn) toggleBtn.textContent = opt.textContent;
+            dropdown.querySelectorAll('.custom-dropdown-option').forEach(o => o.classList.remove('selected'));
+            opt.classList.add('selected');
+            if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'false');
+          } else {
+            const toggleBtn = dropdown.querySelector('.custom-dropdown-toggle');
+            if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'false');
+          }
+        }
+      });
+    };
+
+    bindCompDropdown('comp-model1-dropdown', 'compModel1');
+    bindCompDropdown('comp-model2-dropdown', 'compModel2');
+    
     document.getElementById('compare-btn').addEventListener('click', loadComparison);
 
     await loadComparison();
@@ -2329,7 +2372,7 @@ function compareAddOptionsHtml(allSessions) {
   const selectedIds = new Set(state.compSelection.map(x => x.id));
   return allSessions
     .filter(s => !selectedIds.has(s.id))
-    .map(s => `<option value="${escHtml(s.id)}">${escHtml(sessionDropdownLabel(s))}</option>`)
+    .map(s => `<div class="custom-dropdown-option" data-value="${escHtml(s.id)}" role="option">${escHtml(sessionDropdownLabel(s))}</div>`)
     .join('');
 }
 
@@ -2339,15 +2382,19 @@ function renderCompareAddSlot(allSessions, variant) {
   if (!addOptions) return '';
 
   return `
-    <label class="sc-add-slot sc-add-slot--${variant}">
+    <div class="sc-add-slot sc-add-slot--${variant}">
       <span class="sc-add-plus">
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
       </span>
-      <select class="sc-inline-add-select" aria-label="Add session to compare">
-        <option value="">Add session…</option>
-        ${addOptions}
-      </select>
-    </label>
+      <div class="custom-dropdown sc-inline-add-dropdown" style="width: min(100%, 200px);">
+        <button type="button" class="sc-inline-add-select custom-dropdown-toggle" aria-haspopup="listbox" aria-expanded="false" style="text-align: left; width: 100%;">
+          Add session…
+        </button>
+        <div class="custom-dropdown-popper" role="listbox">
+          ${addOptions}
+        </div>
+      </div>
+    </div>
   `;
 }
 
@@ -2376,8 +2423,23 @@ function removeCompareSession(id) {
 }
 
 function bindSessionCompareInlineControls(container) {
-  container.querySelectorAll('.sc-inline-add-select').forEach(select => {
-    select.addEventListener('change', () => addCompareSession(select.value));
+  container.querySelectorAll('.sc-inline-add-dropdown').forEach(dropdown => {
+    dropdown.addEventListener('click', (e) => {
+      const toggle = e.target.closest('.custom-dropdown-toggle');
+      if (toggle) {
+        e.stopPropagation();
+        const isExpanded = toggle.getAttribute('aria-expanded') === 'true';
+        toggle.setAttribute('aria-expanded', !isExpanded);
+        return;
+      }
+
+      const opt = e.target.closest('.custom-dropdown-option');
+      if (opt) {
+        e.stopPropagation();
+        const val = opt.getAttribute('data-value');
+        if (val) addCompareSession(val);
+      }
+    });
   });
 
   container.querySelectorAll('[data-remove-session]').forEach(btn => {
@@ -2437,10 +2499,17 @@ function renderSessionComparePage() {
       const selectedIds = new Set(state.compSelection.map(x => x.id));
       const opts = allSessions
         .filter(s => !selectedIds.has(s.id))
-        .map(s => `<option value="${escHtml(s.id)}">${escHtml(sessionDropdownLabel(s))}</option>`)
+        .map(s => `<div class="custom-dropdown-option" data-value="${escHtml(s.id)}" role="option">${escHtml(sessionDropdownLabel(s))}</div>`)
         .join('');
       return opts && state.compSelection.length < COMP_LETTERS.length
-        ? `<select class="sc-toolbar-add-select" id="sc-toolbar-add-select" aria-label="Add session to compare"><option value="">+ Add session</option>${opts}</select>`
+        ? `<div class="custom-dropdown" id="sc-toolbar-add-dropdown" style="margin-left: auto;">
+             <button type="button" class="sc-toolbar-add-select custom-dropdown-toggle section-title-select" aria-haspopup="listbox" aria-expanded="false" style="margin-left: 0; width: 200px; text-align: left;">
+               + Add session
+             </button>
+             <div class="custom-dropdown-popper" role="listbox">
+               ${opts}
+             </div>
+           </div>`
         : '';
     })()}
     </div>
@@ -2469,9 +2538,25 @@ function renderSessionComparePage() {
     });
   });
 
-  document.getElementById('sc-toolbar-add-select')?.addEventListener('change', e => {
-    addCompareSession(e.target.value);
-  });
+  const toolbarAddDropdown = document.getElementById('sc-toolbar-add-dropdown');
+  if (toolbarAddDropdown) {
+    toolbarAddDropdown.addEventListener('click', (e) => {
+      const toggle = e.target.closest('.custom-dropdown-toggle');
+      if (toggle) {
+        e.stopPropagation();
+        const isExpanded = toggle.getAttribute('aria-expanded') === 'true';
+        toggle.setAttribute('aria-expanded', !isExpanded);
+        return;
+      }
+
+      const opt = e.target.closest('.custom-dropdown-option');
+      if (opt) {
+        e.stopPropagation();
+        const val = opt.getAttribute('data-value');
+        if (val) addCompareSession(val);
+      }
+    });
+  }
 
   document.getElementById('sc-present-toggle')?.addEventListener('click', () => {
     if (state.scPresent) {
