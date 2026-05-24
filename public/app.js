@@ -1268,30 +1268,32 @@ async function renderOverview() {
 
     const sortDropdown = document.getElementById('overview-session-sort-dropdown');
     if (sortDropdown) {
-      const toggle = sortDropdown.querySelector('.custom-dropdown-toggle');
-      const options = sortDropdown.querySelectorAll('.custom-dropdown-option');
+      sortDropdown.addEventListener('click', async (e) => {
+        const toggle = e.target.closest('.custom-dropdown-toggle');
+        if (toggle) {
+          e.stopPropagation();
+          const isExpanded = toggle.getAttribute('aria-expanded') === 'true';
+          toggle.setAttribute('aria-expanded', !isExpanded);
+          return;
+        }
 
-      toggle.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const isExpanded = toggle.getAttribute('aria-expanded') === 'true';
-        toggle.setAttribute('aria-expanded', !isExpanded);
-      });
-
-      options.forEach(opt => {
-        opt.addEventListener('click', async (e) => {
+        const opt = e.target.closest('.custom-dropdown-option');
+        if (opt) {
           e.stopPropagation();
           const val = opt.getAttribute('data-value');
+          const toggleBtn = sortDropdown.querySelector('.custom-dropdown-toggle');
+          
           if (val !== state.overviewSessionSort) {
             state.overviewSessionSort = val;
-            toggle.textContent = opt.textContent;
-            options.forEach(o => o.classList.remove('selected'));
+            if (toggleBtn) toggleBtn.textContent = opt.textContent;
+            sortDropdown.querySelectorAll('.custom-dropdown-option').forEach(o => o.classList.remove('selected'));
             opt.classList.add('selected');
-            toggle.setAttribute('aria-expanded', 'false');
+            if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'false');
             await loadOverviewSessions();
           } else {
-            toggle.setAttribute('aria-expanded', 'false');
+            if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'false');
           }
-        });
+        }
       });
     }
 
@@ -1483,27 +1485,40 @@ async function renderSessions() {
     const curPage = state.sessionsPage;
 
     const projectOptions = projects.map(p =>
-      `<option value="${escHtml(p.id)}" ${state.sessionsFilter.projectId === p.id ? 'selected' : ''}>${escHtml(p.name)}</option>`
+      `<div class="custom-dropdown-option ${state.sessionsFilter.projectId === p.id ? 'selected' : ''}" data-value="${escHtml(p.id)}" role="option">${escHtml(p.name)}</div>`
     ).join('');
 
     const modelOptions = models.map(m =>
-      `<option value="${escHtml(m.model)}" ${state.sessionsFilter.model === m.model ? 'selected' : ''}>${escHtml(m.model)}</option>`
+      `<div class="custom-dropdown-option ${state.sessionsFilter.model === m.model ? 'selected' : ''}" data-value="${escHtml(m.model)}" role="option">${escHtml(m.model)}</div>`
     ).join('');
 
     const content = document.getElementById('content');
+    const selectedProjectName = projects.find(p => p.id === state.sessionsFilter.projectId)?.name || 'All projects';
+    const selectedModelName = state.sessionsFilter.model || 'All models';
+
     content.innerHTML = `
       <h1 class="page-title">Sessions</h1>
       <p class="page-subtitle">${periodLabel()}</p>
 
       <div class="filter-bar">
-        <select id="filter-project">
-          <option value="">All projects</option>
-          ${projectOptions}
-        </select>
-        <select id="filter-model">
-          <option value="">All models</option>
-          ${modelOptions}
-        </select>
+        <div class="custom-dropdown" id="filter-project-dropdown">
+          <button type="button" class="section-title-select custom-dropdown-toggle" aria-haspopup="listbox" aria-expanded="false" style="min-width: 160px;">
+            ${escHtml(selectedProjectName)}
+          </button>
+          <div class="custom-dropdown-popper" role="listbox">
+            <div class="custom-dropdown-option ${!state.sessionsFilter.projectId ? 'selected' : ''}" data-value="" role="option">All projects</div>
+            ${projectOptions}
+          </div>
+        </div>
+        <div class="custom-dropdown" id="filter-model-dropdown">
+          <button type="button" class="section-title-select custom-dropdown-toggle" aria-haspopup="listbox" aria-expanded="false" style="min-width: 160px;">
+            ${escHtml(selectedModelName)}
+          </button>
+          <div class="custom-dropdown-popper" role="listbox">
+            <div class="custom-dropdown-option ${!state.sessionsFilter.model ? 'selected' : ''}" data-value="" role="option">All models</div>
+            ${modelOptions}
+          </div>
+        </div>
         <a class="export-csv-btn" href="${api.withSince('/api/export/sessions.csv')}" download>↓ CSV</a>
         <span class="filter-count sessions-filter-count">${total.toLocaleString()} session${total !== 1 ? 's' : ''}</span>
         <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
@@ -1545,17 +1560,36 @@ async function renderSessions() {
       });
     });
 
-    document.getElementById('filter-project').addEventListener('change', e => {
-      state.sessionsFilter.projectId = e.target.value;
-      state.sessionsPage = 0;
-      renderSessions();
-    });
+    const bindFilterDropdown = (id, filterKey) => {
+      const dropdown = document.getElementById(id);
+      if (!dropdown) return;
+      
+      dropdown.addEventListener('click', (e) => {
+        const toggle = e.target.closest('.custom-dropdown-toggle');
+        if (toggle) {
+          e.stopPropagation();
+          const isExpanded = toggle.getAttribute('aria-expanded') === 'true';
+          toggle.setAttribute('aria-expanded', !isExpanded);
+          return;
+        }
 
-    document.getElementById('filter-model').addEventListener('change', e => {
-      state.sessionsFilter.model = e.target.value;
-      state.sessionsPage = 0;
-      renderSessions();
-    });
+        const opt = e.target.closest('.custom-dropdown-option');
+        if (opt) {
+          e.stopPropagation();
+          const val = opt.getAttribute('data-value');
+          if (val !== state.sessionsFilter[filterKey]) {
+            state.sessionsFilter[filterKey] = val;
+            state.sessionsPage = 0;
+            const toggleBtn = dropdown.querySelector('.custom-dropdown-toggle');
+            if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'false');
+            renderSessions();
+          }
+        }
+      });
+    };
+
+    bindFilterDropdown('filter-project-dropdown', 'projectId');
+    bindFilterDropdown('filter-model-dropdown', 'model');
 
     content.querySelectorAll('.page-btn[data-page]').forEach(btn => {
       btn.addEventListener('click', () => {
