@@ -2544,10 +2544,10 @@ function renderSessionComparePage() {
         .join('');
       return opts && state.compSelection.length < COMP_LETTERS.length
         ? `<div class="custom-dropdown" id="sc-toolbar-add-dropdown" style="margin-left: auto;">
-             <button type="button" class="sc-toolbar-add-select custom-dropdown-toggle section-title-select" aria-haspopup="listbox" aria-expanded="false" style="margin-left: 0; width: 200px; text-align: left;">
+             <button type="button" class="sc-toolbar-add-select custom-dropdown-toggle section-title-select" aria-haspopup="listbox" aria-expanded="false" style="margin-left: 0; width: 200px; text-align: left; background-image: none;">
                + Add session
              </button>
-             <div class="custom-dropdown-popper" role="listbox">
+             <div class="custom-dropdown-popper" role="listbox" style="right: 0; left: auto;">
                ${opts}
              </div>
            </div>`

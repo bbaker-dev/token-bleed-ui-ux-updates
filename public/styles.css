@@ -2769,7 +2769,7 @@ td.msg-prompt {
   --red-dim:     rgba(201, 36, 36, 0.08);
 
   --text-primary:   #0f172a;
-  --text-secondary: #374151;
+  --text-secondary: #858e9a;
   --text-muted:     #6b7280;
 }
 
@@ -3548,6 +3548,8 @@ td.msg-prompt {
   gap: 10px;
   margin-bottom: 20px;
   flex-wrap: wrap;
+  position: relative;
+  z-index: 100;
 }
 
 .sc-view-toggle {
