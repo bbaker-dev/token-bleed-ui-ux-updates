@@ -2008,6 +2008,7 @@ function renderMessagesTable(messages, opts = {}) {
     if (prompt.length > TRUNC) {
       const idx = promptStoreIdx++;
       promptStore.set(idx, prompt);
+      if (promptStore.size > 200) promptStore.delete(promptStore.keys().next().value);
       promptCell = `<span class="msg-prompt-text">${escHtml(prompt.slice(0, TRUNC))}…</span><span class="msg-prompt-expand" data-prompt-idx="${idx}">show more</span>`;
     } else {
       promptCell = `<span class="msg-prompt-text">${escHtml(prompt)}</span>`;
